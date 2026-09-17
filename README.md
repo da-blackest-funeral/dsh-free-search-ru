@@ -4,337 +4,78 @@
 >
 > - **Русский интерфейс** в карточке настроек (по умолчанию `ru`; переключатель `ru → 中文 → EN → ru`).
 > - **Perplexity на новом Agent API** (`POST /v1/agent`, модель `perplexity/sonar` + `web_search` tool). Старый `/v1/chat/completions` отключится 27 сентября 2026, так что без этого апстрим скоро сломается.
-> - **Time-filter для Perplexity** — теперь работает через `web_search.filters.search_recency_filter` (hour/day/week/month/year).
+> - **Time-filter для Perplexity** — теперь работает через `web_search.filters.search_recency_filter` (hour / day / week / month / year) и `last_updated_after_filter` (абсолютная дата MM/DD/YYYY).
 > - **Корректный парсинг новых источников** — `output[].search_results` с полями `title`, `snippet`, `url`, `date`, `last_updated` (а не старый плоский `citations[]`).
+> - **README и комментарии в коде переведены на русский** для удобства русскоязычных пользователей и контрибьюторов.
 >
-> Форк поддерживается в актуальном состоянии с апстримом через git remote `upstream`.
+> Форк синхронизируется с апстримом через git remote `upstream`. Документация ниже описывает форк, но большая часть описаний движков справедлива и для оригинала.
 
-**DeepSeek Harness 免费搜索插件 —— 无需 API key，零成本，多引擎可切换。** 一个给 DeepSeek Harness (dsh) 添加多引擎搜索 provider 的插件，注册进 `ctx.web` seam。内置 `web_search` 工具自动选用，支持网页设置页切换引擎、配置 API key、一键测试所有引擎、弹出式命令切换引擎。
+**Плагин веб-поиска для DeepSeek Harness — без API-ключей, бесплатно, с переключением движков.** Регистрирует свой `WebSearchProvider` в seam `ctx.web`, так что встроенный инструмент `web_search` начинает работать «из коробки». Поддерживает веб-страницу настроек (переключение движков, ключи, тест), всплывающую команду `/free-search-engine` для смены движка из чата и автофоллбэк между движками при любой ошибке.
 
-[中文](#中文) · [English](#english)
+[Русский](#русский) · [English](#english)
 
 ---
 
-## 中文
+## Русский
 
 <div align="center">
   <a href="https://raw.githubusercontent.com/DDDMUC/dsh-free-search/master/assets/settings-free1.png">
-    <img src="https://raw.githubusercontent.com/DDDMUC/dsh-free-search/master/assets/settings-free1.png" alt="免费引擎设置 (Bing)" width="820" />
+    <img src="https://raw.githubusercontent.com/DDDMUC/dsh-free-search/master/assets/settings-free1.png" alt="Настройки бесплатного движка (Bing)" width="820" />
   </a>
   <br>
-  <sub>▲ 免费引擎（以Bing为例）</sub>
+  <sub>▲ Настройки бесплатного движка (на примере Bing)</sub>
 </div>
 
-### 为什么需要它
+### Зачем это нужно
 
-dsh 默认的搜索 provider 依赖 DeepSeek 官方 API key（`DEEPSEEK_API_KEY`）。如果你：
-- 没有（或不想用）DeepSeek 官方 key，
-- 用的是 opencode-go 这类网关（其 OpenAI 兼容端点不支持 `web_search` 工具），
+Встроенный провайдер поиска в dsh зависит от официального ключа DeepSeek API (`DEEPSEEK_API_KEY`). Если вы:
 
-……那么内置搜索必然失败，agent 会告诉你"无法联网"。
+- не имеете (или не хотите использовать) официального ключа DeepSeek,
+- используете шлюзы вроде opencode-go, чьи OpenAI-совместимые эндпоинты не поддерживают инструмент `web_search`,
 
-这个插件提供多个免费引擎 + 自动回退，彻底摆脱 DeepSeek 官方 key 的依赖。
+…то встроенный поиск неизбежно падает, а агент рапортует «не удаётся выйти в интернет».
 
-### 特性
+Этот плагин даёт несколько бесплатных движков и автоматический фоллбэк между ними, полностью снимая зависимость от ключа DeepSeek.
 
-- **零成本** —— 多个免费引擎，无需 key、无需注册
-- **多引擎可选**：DuckDuckGo（html/lite）、Bing、SearXNG（元搜索，支持自定义实例）、AnySearch、Exa、Tavily、Keenable、Firecrawl、Parallel、Perplexity、DeepSeek 官方
-- **网页设置页** —— 引擎切换 + API key 配置（UI 中 key 脱敏显示"已配置"）+ 中英文切换
-- **弹出式切换命令** —— 聊天框输入 `/free-search-engine`，弹出引擎选择窗口，点选即切换（等效设置页 + 保存）
-- **引擎测试** —— `free_search_test` 工具让 agent 一键测试所有引擎；设置页也有"测试引擎"按钮（直测当前引擎，不走回退链，付费引擎无 key 会明确报错）
-- **统一引擎回退** —— 任何引擎失败（付费/免费，缺 key/401/限流/网络）自动轮流尝试下一个引擎：首选引擎 → 其他引擎（exa/tavily/keenable/firecrawl 无 key 也会尝试，因为它们自带 keyless 免费额度）→ 剩余免费引擎，搜索永不直接失败；结果顶部注明实际生效的引擎（如 `Note: perplexity unavailable or failed, using exa.`）
-- **时间过滤** —— `advanced_search` 工具支持 `timeRange`：固定档、自定义相对值、绝对日期三种形式（详见下方逻辑说明）
-- **系统提示词注入** —— agent 知道当前用哪个引擎、哪些需要 key
-- **版本号 + 检查更新** —— 设置卡片显示当前版本（v0.4.17），"检查更新"按钮直连 npm registry 对比最新版，有新版本时提示并可一键跳转
-- **结果缓存** —— 相同查询（含引擎/时间过滤参数）5 分钟内命中缓存（LRU 50 条），防免费引擎限流、省付费额度；时长可在设置页 0-5 分钟自由配置（0 关闭）
-- **免费标注** —— 设置页中免费引擎带绿色 `FREE` 徽章，付费引擎带橙色 `API KEY` 徽章
-- **网页抓取（web_fetch）** —— 让 agent 抓取网页内容（官方 `dsh-web-fetch-http` provider，纯 JS，零额外依赖）
-- **平台搜索（platform_search）** —— 搜 GitHub / V2EX / B站 / Reddit / Hacker News / Stack Overflow / 维基百科 / npm（公开 API，零依赖）
-- **干净集成** —— 实现官方 `WebSearchProvider` seam 接口，与官方插件共存
+### Возможности
 
-如果这个插件帮到了你，欢迎给仓库点个 ⭐（[GitHub](https://github.com/DDDMUC/dsh-free-search)）——星标是开发者继续维护的最大动力，感谢支持！
+- **Бесплатно** — несколько бесплатных движков, без ключей и без регистрации.
+- **12 движков на выбор**: DuckDuckGo (HTML / Lite), Bing, SearXNG (мета-поиск с кастомными инстансами), AnySearch, Exa, Tavily, Keenable, Firecrawl, Parallel, Perplexity, официальный DeepSeek.
+- **Веб-страница настроек** — переключение движка + ключи API (в UI ключи маскируются как «настроено») + переключатель языка `ru / 中文 / EN`.
+- **Команда в чате** — введите `/free-search-engine`, откроется всплывающее окно выбора движка (как `/model` для смены модели); клик сохраняет настройку.
+- **Тестирование движков** — инструмент `free_search_test` позволяет агенту за один заход прогнать все движки; на странице настроек есть кнопка «Проверить движок» (тестирует текущий движок напрямую, без фоллбэка — платные без ключа явно сообщат об ошибке).
+- **Единый фоллбэк движков** — при любой ошибке (платный/бесплатный, нет ключа / 401 / лимит / сеть) плагин по очереди пробует следующие: сначала выбранный движок → другие движки (exa / tavily / keenable / firecrawl пробуются даже без ключа, т.к. у них есть бесплатная keyless-квота) → оставшиеся бесплатные движки. Поиск никогда не валится напрямую; в начале результата пишется, какой движок реально отработал (например, `Note: perplexity unavailable or failed, using exa.`).
+- **Фильтр по времени** — инструмент `advanced_search` поддерживает `timeRange`: фиксированные диапазоны, относительные значения или абсолютную дату (подробности ниже).
+- **Инъекция в системный промпт** — агент знает, какой движок сейчас активен и каким нужен ключ.
+- **Версия и проверка обновлений** — на карточке отображается текущая версия (v0.4.29), кнопка «Проверить обновления» сверяется с npm registry и при наличии новой версии предлагает переход.
+- **Кэш результатов** — одинаковые запросы (один движок и те же параметры времени) попадают в LRU-кэш (50 записей) на 5 минут — защита бесплатных движков от лимитов и экономия платной квоты; TTL настраивается в карточке (0–5 минут; 0 отключает кэш).
+- **Бейджи** — бесплатные движки отмечены зелёным `FREE`, платные — оранжевым `API KEY`.
+- **`web_fetch`** — позволяет агенту читать полный текст веб-страницы (официальный провайдер `dsh-web-fetch-http`, чистый JS, без зависимостей).
+- **`platform_search`** — поиск по GitHub / V2EX / Bilibili / Reddit / Hacker News / Stack Overflow / Википедия / npm через публичные API (без ключей и зависимостей).
+- **Чистая интеграция** — реализует официальный интерфейс `WebSearchProvider`, сосуществует с официальными плагинами.
 
-### 引擎列表
+Если плагин оказался полезен — поставьте ⭐ [апстриму](https://github.com/DDDMUC/dsh-free-search) и/или этому форку. Это лучшая мотивация продолжать поддержку, спасибо!
 
-| id | 引擎 | 费用 | 说明 |
+### Список движков
+
+| id | Движок | Стоимость | Описание |
 |---|---|---|---|
-| `ddg` | DuckDuckGo HTML | 免费 | 偶发限流（反爬），解封自动恢复 |
-| `ddg-lite` | DuckDuckGo Lite | 免费 | 轻量版，同上 |
-| `bing` | Bing | 免费 | **默认引擎**，最稳定，中文优化（zh-CN） |
-| `anysearch` | AnySearch AI | 免费 | AI 搜索，无 key（匿名额度） |
-| `searxng` | SearXNG 元搜索 | 免费 | 多实例自动切换，支持自定义实例 |
-| `exa` | Exa | 免费 | **无 key 也可用**（MCP 匿名），配 key 提升额度 |
-| `tavily` | Tavily | 免费 | **无 key 也可用**（keyless 匿名），配 key 提升额度 |
-| `keenable` | Keenable | 免费 | **无 key 也可用**（MCP 匿名），配 key 提升额度 |
-| `firecrawl` | Firecrawl | 免费 | **无 key 也可用**（官方免 key 匿名额度），配 key 提升限额 |
-| `parallel` | Parallel | 付费 | 需 `PARALLEL_API_KEY`（platform.parallel.ai 有免费额度） |
-| `perplexity` | Perplexity | 付费 | 需 `PERPLEXITY_API_KEY` |
-| `deepseek-official` | DeepSeek 官方 | 付费 | 需 `DEEPSEEK_API_KEY` |
-
-- **默认引擎为 `bing`**（免费且最稳定），安装后开箱即用。
-- **自动回退**：任何引擎失败（免费限流/反爬，付费缺 key/无效/网络错误）都会自动轮流尝试下一个引擎——先试其他已配 key 的付费引擎，再试免费引擎（Bing/AnySearch 等），并在结果中附带回退提示——搜索不会因引擎问题直接失败。
-- **设置页有官网链接**：免费引擎显示"访问官网 →"，付费引擎显示"获取 API Key →"（新标签页打开）：
-  - Exa：<https://dashboard.exa.ai/api-keys>
-  - Tavily：<https://app.tavily.com/home>
-  - Keenable：<https://keenable.ai/login>
-  - Parallel：<https://platform.parallel.ai>
-  - Perplexity：<https://www.perplexity.ai/settings/api>
-  - DeepSeek：<https://platform.deepseek.com/api_keys>
-
-#### 为什么免费引擎不需要 key？
-
-- **AnySearch**：其 `v1/search` REST 接口提供匿名的公共搜索额度，无需注册或 API key。额度有限流（适合日常搜索），但作为免费引擎之一，与其他免费引擎互相回退，体验稳定。
-- **Exa**：公开 MCP 端点（`mcp.exa.ai/mcp`）支持匿名调用，不配 key 也能用；配置 `EXA_API_KEY` 后可获得更高额度。
-- **Tavily**：通过 `x-tavily-access-mode: keyless` 头走 keyless 匿名额度，不配 key 即可用；配置 `TAVILY_API_KEY` 后走账号档，额度更高、结果质量更稳定。
-- **Keenable**：无 key 时走其公开 MCP 端点（`api.keenable.ai/mcp`）匿名调用；配置 `KEENABLE_API_KEY` 后走 REST API（`api.keenable.ai/v1/search`），额度更高、按组织限流。
-- **Firecrawl**：其 `/v2/search` 端点**无需 key** 即可使用（官方文档明确说明，有匿名限流）；配置 `FIRECRAWL_API_KEY` 后可提高限额。支持 `tbs` 时间过滤（`qdr:h/d/w/m/y` 与自定义日期区间）。
-
-### 安装
-
-```sh
-git clone https://github.com/DDDMUC/dsh-free-search.git
-dsh plugin --profile web add /path/to/dsh-free-search
-```
-
-然后重启：
-
-```sh
-dsh web
-```
-
-#### 姊妹插件：dsh-preset-workbench（预设工作台）
-
-同作者的**姊妹插件**：在设置页里可视化创建/编辑 Agent 预设——分段提示词、15 项能力开关、内置「鲸鱼娘 / 梁神模式」模板，不用手写 YAML。两者搭配：**free-search 解决"AI 联网搜索"、preset-workbench 解决"AI 人设能力编排"**，都是纯免费、开箱即用。
-
-- 仓库：<https://github.com/DDDMUC/dsh-preset-workbench>
-- 安装：`dsh plugin --profile web add github:DDDMUC/dsh-preset-workbench`
-- 用法：设置 → 预设工作台
-
-如果你觉得 preset-workbench 也有用，同样欢迎给它的仓库点个 ⭐。🙏
-
-#### 依赖说明
-
-插件对 `@deepseek-ai/dsh-settings` 和 `@deepseek-ai/dsh-tools` 使用 `peerDependencies`，这是刻意的：DSH 运行时必须使用安装树中的唯一实例。请通过 `dsh plugin --profile <profile> add ...` 安装插件，不要把 DSH 核心包复制进 profile 的本地 `node_modules`；重复副本会导致工具调度器失效。
-
-### 使用
-
-#### 网页设置（推荐）
-
-安装后，打开 **设置 → 插件 → 可配置** 标签页 → **Free Search** 卡片（官方设置页）：
-
-- **Search engine**：下拉框切换引擎，保存即生效
-- **API keys**：为 Exa / Tavily / Keenable / Firecrawl / Parallel / Perplexity / DeepSeek 填写 key（密码框，保存后只显示"已配置"）
-  - **推荐**：付费引擎 key 建议写入 harness 凭据中心 `~/.dsh/.credentials.yaml`（如 `DEEPSEEK_API_KEY: sk-...`，与官方 LLM provider 一致，一处管理所有 key）。插件读取优先级：凭据中心 > 设置页 > 环境变量，设置页填的 key 仅作为遗留兼容。
-- **Test engine**：直测当前引擎可用性（不走回退链，付费引擎无 key 会明确报错）
-- **Use Bing default**：把当前搜索引擎切回稳定的免费 Bing；`Discard` 只撤销尚未保存的编辑
-- **Platform search**：勾选启用 GitHub / V2EX / Bilibili 平台搜索（`platform_search` 工具按此过滤）
-- **EN / 中文**：切换界面语言（默认中文）
-
-<table align="center" style="border: none; border-collapse: collapse;">
-  <tr style="border: none;">
-    <td align="center" width="50%" style="border: none; padding: 6px;">
-      <a href="https://raw.githubusercontent.com/DDDMUC/dsh-free-search/master/assets/settings-free.png">
-        <img src="https://raw.githubusercontent.com/DDDMUC/dsh-free-search/master/assets/settings-free.png" alt="免费引擎设置" width="100%" />
-      </a>
-      <br>
-      <sub>▲ <b>免费引擎</b>（显示绿色 FREE 徽章与官网链接）</sub>
-    </td>
-    <td align="center" width="50%" style="border: none; padding: 6px;">
-      <a href="https://raw.githubusercontent.com/DDDMUC/dsh-free-search/master/assets/settings-apikey.png">
-        <img src="https://raw.githubusercontent.com/DDDMUC/dsh-free-search/master/assets/settings-apikey.png" alt="付费引擎设置" width="100%" />
-      </a>
-      <br>
-      <sub>▲ <b>付费/API Key 引擎</b>（显示橙色 API KEY 徽章与获取链接）</sub>
-    </td>
-  </tr>
-</table>
-
-#### 聊天框切换引擎（/free-search-engine）
-
-不用进设置页也能切换引擎：在聊天框输入 `/free-search-engine`，**弹出引擎选择窗口**（和 `/model` 选模型一样的交互），点选即切换，当前引擎会标记出来。等效于设置页切换 + 保存，且界面语言跟随设置页（中文/英文）。
-
-命令只改首选引擎配置，搜索仍走 `web_search` + 统一回退链：即使首选引擎挂了也会自动换其他引擎，永不直接失败。系统提示词同步刷新。
-
-#### 配置文件
-
-配置存在 `~/.dsh/settings.yaml`：
-
-```yaml
-free-search:
-  provider: bing              # ddg / ddg-lite / bing / searxng / anysearch / exa / tavily / keenable / firecrawl / parallel / perplexity / deepseek-official
-  lang: zh                    # 设置页界面语言（zh / en）
-  bingMarket: zh-CN           # Bing 市场
-  region: cn-zh               # DuckDuckGo 区域（可选）
-  searxngInstances:           # 自定义 SearXNG 实例（可选）
-    - https://your-instance.example
-  exaApiKey: ...              # 或通过设置页填写
-  tavilyApiKey: ...           # 或通过设置页填写
-  keenableApiKey: ...         # 或通过设置页填写
-  firecrawlApiKey: ...        # 或通过设置页填写
-  parallelApiKey: ...         # 或通过设置页填写
-  perplexityApiKey: ...
-  deepseekApiKey: ...
-```
-
-#### 让 agent 测试所有引擎
-
-对 agent 说"测试一下所有搜索引擎"，它会调用 `free_search_test` 工具，逐个测试并报告：
-
-```
-Search engine test:
-- ddg: FAIL - DuckDuckGo is rate-limited right now (anti-bot challenge, usually temporary) - Bing works
-- bing: OK (2 results, e.g. "DeepSeek Harness developer preview...")
-- exa: FAIL - EXA_API_KEY not configured
-```
-
-#### 时间过滤（advanced_search）
-
-让 agent 搜"最近一周的新闻"、"这个月的发布"、"最近 3 天的消息"、"7 月以来的更新"，它会调用 `advanced_search` 工具，带 `timeRange` 参数。该工具同样走统一回退链，且可显式指定 `engine`，返回结构同 `web_search`。
-
-**timeRange 支持三种形式：**
-
-| 形式 | 示例 | 含义 |
-|---|---|---|
-| 固定档 | `day` / `week` / `month` / `year` | 分别 = 1 / 7 / 30 / 365 天 |
-| 自定义相对值 | `12h`、`3d`、`2mo`、`1y` | 最近 12 小时 / 3 天 / 2 个月 / 1 年 |
-| 绝对日期 | `2026-07-01` | 该日期（含）之后发布的结果 |
-
-**各引擎对 timeRange 的处理逻辑：**
-
-| 引擎 | 参数 | 是否精确 | 说明 |
-|---|---|---|---|
-| Exa | `startPublishedDate` | ✅ 精确 | 自定义天数转成 ISO 日期（N 天前），绝对日期原样传入 |
-| Keenable | `published_after` | ✅ 精确 | 相对值原样传（`12h/3d/2mo/1y`），绝对日期原样传 |
-| Tavily | `time_range` | ⚠️ 近似 | 只认固定档，自定义天数自动映射到最近似档位 |
-| Firecrawl | `tbs` | ⚠️ 近似 | 固定档映射到 `qdr:d/w/m/y`；绝对日期用 `cdr:1,cd_min:M/D/YYYY`（精确） |
-| Parallel | `source_policy.after_date` | ✅ 精确 | 自定义天数转成 ISO 日期（N 天前），绝对日期原样传入 |
-| SearXNG | `time_range` | ⚠️ 近似 | 同上 |
-| DuckDuckGo / Lite | `df` | ⚠️ 近似 | 同上 |
-| Bing / AnySearch | — | ❌ 忽略 | 无对应参数 |
-
-**"最近似档位"映射规则**：`≤2 天 → day`，`≤14 天 → week`，`≤90 天 → month`，否则 `year`。例如 `3d` 在 Tavily 上按 `day` 处理，`2mo` 按 `month` 处理。
-
-**引擎链优先级**：当带 timeRange 搜索时，支持时间过滤的引擎（tavily / exa / keenable / firecrawl / parallel / searxng / ddg / ddg-lite）会排到引擎链前面，确保过滤真正生效——即使首选引擎是 bing（不支持过滤），也会先尝试支持过滤的引擎。
-
-示例对话：*"帮我搜最近 3 天关于 DSH 的新闻"* → agent 调用 `advanced_search`，`timeRange: "3d"`。
-
-#### 抓取网页内容（web_fetch）
-
-搜索到 URL 后，可以让 agent **读取网页全文**（如"打开第一个链接看看内容"）。`web_fetch` 工具已启用（官方 `dsh-web-fetch-http` provider）：
-
-- 自动跟随重定向、解码正文（HTML 转文本）
-- 支持超时和大小限制
-- ⚠️ 注意：`web_fetch` 无 SSRF 防护，agent 理论上可访问内网地址——按需使用
-
-#### 平台搜索（platform_search）
-
-让 agent 搜特定平台，如"在 GitHub 上搜 deepseek harness"、"看看 B站有什么相关视频"、"V2EX 上关于 dsh 的讨论"。`platform_search` 工具支持：
-
-| 平台 | 用途 |
-|---|---|
-| `github` | GitHub 仓库搜索（API，免费无 key） |
-| `v2ex` | V2EX 热门/相关主题 |
-| `bilibili` | B站视频/内容搜索（公开接口） |
-| `reddit` | Reddit 帖子/讨论搜索（公开 JSON API；部分网络环境可能被 Reddit 反爬拦截） |
-| `hn` | Hacker News 技术社区讨论（Algolia 官方 API） |
-| `stackoverflow` | Stack Overflow 技术问答（Stack Exchange 官方公开 API） |
-| `wikipedia` | 维基百科词条（中文环境用 zh.wikipedia.org，`lang: en` 时切换 en.wikipedia.org） |
-| `npm` | npm 包搜索（registry 官方 API） |
-
-全部走公开 API，零外部依赖、无需任何 key，开箱即用。
-
-### 本地引擎切换工具（tools/）
-
-`tools/` 目录附带了一个本地切换小工具（零依赖）：
-
-- **`启动搜索引擎切换器.cmd`**（Windows）——双击启动本地 Node 服务（`http://127.0.0.1:4789`）并自动打开浏览器选择页面
-- **`switch-engine.html`** —— 选择页面：显示当前引擎，点选新引擎，一键写入配置
-- **`server.mjs`** —— 本地服务，负责读写 `~/.dsh/profiles/web/cordis.patch.yml`
-- **`switch-engine.ps1`** —— 无界面命令行版：`powershell -File tools/switch-engine.ps1 -Engine bing`
-
-切换后重启 `dsh web` 生效。
-
-> 配置卡片挂在官方设置页的 `settings.plugin.item` 插槽（dsh 自带），配置读写走插件自建 bridge，**不依赖 dsh-web-ui**，插件可独立使用。
-
-### 代理说明（国内用户）
-
-DuckDuckGo 等引擎可能需要代理才能访问，而 Node.js 的 `fetch` 默认不走系统代理。需要给 dsh 进程设置（Node 24+）：
-
-```sh
-export NODE_USE_ENV_PROXY=1
-export HTTPS_PROXY=http://127.0.0.1:7897   # 你的代理地址
-export HTTP_PROXY=http://127.0.0.1:7897
-```
-
-Windows 用户：桌面快捷方式已内置此配置（`set NODE_USE_ENV_PROXY=1&& set HTTPS_PROXY=...`）。
-
-### 工作原理
-
-- `lib/index.js`：host 端。实现 `WebSearchProvider`（`id` / `available()` / `search()`），统一引擎路由 + 自动回退（付费引擎优先，免费兜底）；解析 `timeRange`（固定档/相对值/绝对日期）并透传给各引擎；注册 `free-search` settings namespace；提供 `/api/dsh-free-search-settings` 读写桥 + `raw-search` 调试接口；注册 `free_search_test`、`platform_search`、`advanced_search` 工具；动态注入引擎清单到系统提示词（设置变更时自动刷新）。
-- `lib/client.js`：浏览器端。React 配置卡片（引擎选择 + key 输入 + 连通测试 + 中英切换），挂载到官方设置页的 `settings.plugin.item` 插槽；注册 `/free-search-engine` 弹出式切换命令（`commandUi` popupSelect，与 `/model` 同机制）。
-- `cordis.patch.yml`：插件 loader 配置。
-
----
-
-## English
-
-<div align="center">
-  <a href="https://raw.githubusercontent.com/DDDMUC/dsh-free-search/master/assets/settings-free1.png">
-    <img src="https://raw.githubusercontent.com/DDDMUC/dsh-free-search/master/assets/settings-free1.png" alt="Free Engine Settings (Bing)" width="820" />
-  </a>
-  <br>
-  <sub>▲ Free engine (using Bing as an example)</sub>
-</div>
-
-### Why You Need It
-
-dsh's default search provider relies on the official DeepSeek API key (`DEEPSEEK_API_KEY`). If you:
-- Do not have (or prefer not to use) an official DeepSeek key,
-- Use a gateway like opencode-go (whose OpenAI-compatible endpoint does not support the `web_search` tool),
-
-...then the built-in search will inevitably fail, and the agent will tell you "I cannot access the internet."
-
-This plugin provides multiple free search engines with automatic fallback, completely freeing you from relying on DeepSeek's official key.
-
-### Features
-
-- **Zero Cost** — Multiple free engines with no API key or registration required
-- **Multi-Engine Support** — DuckDuckGo (HTML / Lite), Bing, AnySearch AI, SearXNG (meta-search with custom instances), Exa, Tavily, Keenable, Firecrawl, Parallel, Perplexity, and DeepSeek Official
-- **Web Settings UI** — Engine switching, API key configuration (keys masked as "configured" in the UI), and a Chinese/English toggle
-- **Popup Switch Command** — Type `/free-search-engine` in the chat: a picker opens with all engines; click one to switch (equivalent to the settings page + save)
-- **Engine Testing** — `free_search_test` for the agent to check all engines in one call; the settings UI also has a "Test engine" button that tests the selected engine directly (no fallback chain; paid engines without a key report an explicit error)
-- **Unified Engine Fallback** — Any engine failure (paid or free, missing key, 401, rate limit, network error) automatically tries the next engine: the configured engine first, then other engines (exa/tavily/keenable/firecrawl are tried even without a key because they have built-in keyless quota), then the remaining free engines (Bing/AnySearch etc.) — with a note attached to the results naming the engine that actually served them (e.g. `Note: perplexity unavailable or failed, using exa.`). Search never fails outright.
-- **Time Filtering** — The `advanced_search` tool supports `timeRange`: fixed tiers, custom relative values, or an absolute date (details below)
-- **System Prompt Injection** — The agent is aware of the currently active engine and which engines require API keys
-- **Version + Update Check** — The settings card shows the current version (v0.4.17), and a "Check update" button queries the npm registry to compare against the latest release, prompting a one-click jump when a newer version exists
-- **Result Caching** — Identical queries (same engine / time-filter args) hit an LRU cache (50 entries) for up to 5 minutes, protecting free engines from rate-limiting and saving paid quota; the TTL is configurable from 0-5 minutes in the settings UI (0 disables caching)
-- **Visual Badges** — Free engines feature a green `FREE` badge, while paid engines show an orange `API KEY` badge in the settings UI
-- **Webpage Fetching (`web_fetch`)** — Allows the agent to read full webpage contents (official `dsh-web-fetch-http` provider, pure JS, zero extra dependencies)
-- **Platform Search (`platform_search`)** — Search GitHub / V2EX / Bilibili / Reddit / Hacker News / Stack Overflow / Wikipedia / npm (public APIs, zero extra dependencies)
-- **Clean Integration** — Implements the official `WebSearchProvider` seam interface, coexisting seamlessly with official plugins
-
-If this plugin has been helpful, a ⭐ on [GitHub](https://github.com/DDDMUC/dsh-free-search) would mean a lot — it's the biggest motivation for the developer to keep maintaining it. Thank you!
-
-### Supported Engines
-
-| id | Engine | Cost | Description |
-|---|---|---|---|
-| `ddg` | DuckDuckGo HTML | Free | Occasional rate limits (anti-bot challenges); recovers automatically |
-| `ddg-lite` | DuckDuckGo Lite | Free | Lightweight version; same rate-limit behavior as above |
-| `bing` | Bing | Free | **Default engine**, most stable, optimized for Chinese (`zh-CN`) |
-| `anysearch` | AnySearch AI | Free | AI search, no key needed (anonymous quota) |
-| `searxng` | SearXNG Meta Search | Free | Multi-instance automatic failover; supports custom instances |
-| `exa` | Exa | Free | **Usable without a key** (anonymous MCP); configure a key for higher quota |
-| `tavily` | Tavily | Free | **Usable without a key** (keyless anonymous); configure a key for higher quota |
-| `keenable` | Keenable | Free | **Usable without a key** (anonymous MCP); configure a key for higher quota |
-| `firecrawl` | Firecrawl | Free | **Usable without a key** (official keyless anonymous quota); configure a key for higher limits |
-| `parallel` | Parallel | Paid | Requires `PARALLEL_API_KEY` (free tier available at platform.parallel.ai) |
-| `perplexity` | Perplexity | Paid | Requires `PERPLEXITY_API_KEY` |
-| `deepseek-official` | DeepSeek Official | Paid | Requires `DEEPSEEK_API_KEY` |
-
-- **Default engine is `bing`** (free and most stable), ready to use out of the box after installation.
-- **Auto-failover**: any engine failure (rate-limited free engine, or missing/invalid paid key, network error) automatically tries the next engine — the configured engine first, then other engines (exa/tavily/keenable/firecrawl are tried even without a key because they have built-in keyless quota), then the remaining free engines (Bing/AnySearch etc.) — with a note attached to the results naming the engine that actually served them (e.g. `Note: perplexity unavailable or failed, using exa.`). Search never fails outright because of engine issues.
-- **Official Links in Settings**: Free engines display "Visit Website →", while paid engines display "Get API Key →" (opens in a new tab):
+| `ddg` | DuckDuckGo HTML | Бесплатный | Случайные лимиты (антибот), восстанавливается автоматически |
+| `ddg-lite` | DuckDuckGo Lite | Бесплатный | Лёгкая версия, то же поведение по лимитам |
+| `bing` | Bing | Бесплатный | **Движок по умолчанию**, самый стабильный, оптимизирован под китайский (`zh-CN`) |
+| `anysearch` | AnySearch AI | Бесплатный | AI-поиск, без ключа (анонимная квота) |
+| `searxng` | SearXNG мета-поиск | Бесплатный | Автоперебор нескольких инстансов, поддержка кастомных |
+| `exa` | Exa | Бесплатный | **Работает без ключа** (анонимный MCP), с ключом — выше квота |
+| `tavily` | Tavily | Бесплатный | **Работает без ключа** (keyless-аноним), с ключом — выше квота |
+| `keenable` | Keenable | Бесплатный | **Работает без ключа** (анонимный MCP), с ключом — REST с лимитами по организации |
+| `firecrawl` | Firecrawl | Бесплатный | **Работает без ключа** (официальная keyless-квота), с ключом — выше лимит |
+| `parallel` | Parallel | Платный | Требует `PARALLEL_API_KEY` (на platform.parallel.ai есть бесплатный тариф) |
+| `perplexity` | Perplexity | Платный | Требует `PERPLEXITY_API_KEY`. В этом форке — на новом Agent API `/v1/agent` |
+| `deepseek-official` | DeepSeek официальный | Платный | Требует `DEEPSEEK_API_KEY` |
+
+- **Движок по умолчанию — `bing`** (бесплатный и самый стабильный), работает сразу после установки.
+- **Автофоллбэк**: при любой ошибке (лимит бесплатного движка / отсутствующий или неверный платный ключ / сетевая ошибка) плагин по очереди пробует следующий — сначала выбранный, затем остальные платные (exa / tavily / keenable / firecrawl пробуются даже без ключа, т.к. у них есть keyless-квота), затем оставшиеся бесплатные (Bing / AnySearch и др.). В результатах прикрепляется пометка о фактически отработавшем движке — поиск никогда не валится напрямую из-за проблем одного движка.
+- **Ссылки на сайты в настройках**: бесплатные движки показывают «Открыть сайт →», платные — «Получить API-ключ →» (открывается в новой вкладке):
   - Exa: <https://dashboard.exa.ai/api-keys>
   - Tavily: <https://app.tavily.com/home>
   - Keenable: <https://keenable.ai/login>
@@ -342,104 +83,139 @@ If this plugin has been helpful, a ⭐ on [GitHub](https://github.com/DDDMUC/dsh
   - Perplexity: <https://www.perplexity.ai/settings/api>
   - DeepSeek: <https://platform.deepseek.com/api_keys>
 
-#### Why are some engines free?
+#### Почему бесплатные движки не требуют ключа?
 
-- **AnySearch**: its `v1/search` REST endpoint provides anonymous public search quota without registration or an API key. Quota is rate-limited (fine for daily queries), but as one of the free engines with mutual fallback it stays reliable.
-- **Exa**: its public MCP endpoint (`mcp.exa.ai/mcp`) supports anonymous requests, so it works without a key; configuring `EXA_API_KEY` grants a higher usage quota.
-- **Tavily**: offers keyless anonymous quota via the `x-tavily-access-mode: keyless` header — it works without a key; configuring `TAVILY_API_KEY` switches to the account tier for higher quota and more stable results.
-- **Keenable**: without a key it is called via its public MCP endpoint (`api.keenable.ai/mcp`); configuring `KEENABLE_API_KEY` switches to the REST API (`api.keenable.ai/v1/search`) for higher quota and organization-scoped rate limits.
-- **Firecrawl**: its `/v2/search` endpoint works **without a key** out of the box (the official docs state "No API key needed to get started", with anonymous rate limits); configuring `FIRECRAWL_API_KEY` raises the limits. Supports `tbs` time filtering (`qdr:h/d/w/m/y` and custom date ranges).
+- **AnySearch**: его REST-эндпоинт `v1/search` отдаёт анонимную публичную поисковую квоту без регистрации и ключа. Квота ограничена по лимитам (хватает для повседневных запросов), но в связке с автофоллбэком остаётся надёжным.
+- **Exa**: публичный MCP-эндпоинт (`mcp.exa.ai/mcp`) поддерживает анонимные вызовы — без ключа тоже работает; `EXA_API_KEY` повышает квоту.
+- **Tavily**: через заголовок `x-tavily-access-mode: keyless` отдаёт анонимную квоту без ключа; `TAVILY_API_KEY` переключает на аккаунтный тариф с большей квотой и стабильным качеством.
+- **Keenable**: без ключа работает через публичный MCP (`api.keenable.ai/mcp`); `KEENABLE_API_KEY` переключает на REST API (`api.keenable.ai/v1/search`) с лимитами по организации.
+- **Firecrawl**: эндпоинт `/v2/search` **работает без ключа** (в официальной документации сказано «No API key needed to get started», с анонимными лимитами); `FIRECRAWL_API_KEY` повышает лимит. Поддерживает `tbs`-фильтр по времени (`qdr:h/d/w/m/y` и кастомные диапазоны дат).
 
-### Installation
+### Установка
+
+Форк ставится прямо из GitHub:
 
 ```sh
-git clone https://github.com/DDDMUC/dsh-free-search.git
-dsh plugin --profile web add /path/to/dsh-free-search
+dsh plugin --profile web add github:da-blackest-funeral/dsh-free-search-ru
 ```
 
-Then restart:
+Либо вручную — клонируйте и добавьте как локальный путь:
+
+```sh
+git clone https://github.com/da-blackest-funeral/dsh-free-search-ru.git
+dsh plugin --profile web add /path/to/dsh-free-search-ru
+```
+
+Затем перезапустите:
 
 ```sh
 dsh web
 ```
 
-#### Sister Plugin: dsh-preset-workbench
+#### Сопутствующий плагин: dsh-preset-workbench
 
-A **sister plugin** by the same author: a **visual workbench for creating/editing agent presets** right inside Settings — sectioned prompts, 15 capability toggles, and built-in "Whale Girl / Liangshen Mode" templates, no YAML needed. Pair them up: **free-search gives your AI web search, preset-workbench shapes its persona & capabilities** — both free and zero-config.
+**Сестринский плагин** того же автора: визуальный «верстак» для создания и редактирования пресетов агента прямо в Настройках — секционированные промпты, 15 тумблеров возможностей, встроенные шаблоны «Whale Girl / Liangshen Mode», без YAML. В паре: **free-search даёт агенту веб-поиск, preset-workbench — личность и набор способностей**. Оба бесплатны и работают «из коробки».
 
-- Repo: <https://github.com/DDDMUC/dsh-preset-workbench>
-- Install: `dsh plugin --profile web add github:DDDMUC/dsh-preset-workbench`
-- Usage: Settings → Preset Workbench
+- Репо: <https://github.com/DDDMUC/dsh-preset-workbench>
+- Установка: `dsh plugin --profile web add github:DDDMUC/dsh-preset-workbench`
+- Использование: Настройки → Preset Workbench
 
-If preset-workbench is useful to you too, a ⭐ on its repo is always welcome. 🙏
+Если preset-workbench тоже полезен — ⭐ на его репо будет кстати. 🙏
 
-#### Dependency Note
+#### Про зависимости
 
-This plugin intentionally specifies `@deepseek-ai/dsh-settings` and `@deepseek-ai/dsh-tools` as `peerDependencies`: the DSH runtime must use a single instance from the installation tree. Always install the plugin using `dsh plugin --profile <profile> add ...`. Do **not** copy DSH core packages into a profile-local `node_modules`, as duplicate copies can break the tool scheduler.
+Плагин намеренно объявляет `@deepseek-ai/dsh-settings` и `@deepseek-ai/dsh-tools` как `peerDependencies`: рантайм DSH должен использовать единственный экземпляр из дерева установки. Ставьте плагин через `dsh plugin --profile <profile> add ...`. **Не копируйте** пакеты ядра DSH в локальный `node_modules` профиля — дубликаты ломают планировщик инструментов.
 
-### Usage
+### Использование
 
-#### Web Settings (Recommended)
+#### Веб-интерфейс настроек (рекомендуется)
 
-After installation, navigate to **Settings → Plugins → Configurable** tab → **Free Search** card (the official settings page):
+После установки откройте **Настройки → Плагины → Настраиваемые** → карточка **Free Search**:
 
-- **Search engine**: Select an engine from the dropdown; changes take effect immediately upon saving.
-- **API keys**: Enter keys for Exa / Tavily / Keenable / Firecrawl / Parallel / Perplexity / DeepSeek (password fields; displayed as "configured" once saved).
-  - **Recommended**: store paid-engine keys in the harness credential center `~/.dsh/.credentials.yaml` (e.g. `DEEPSEEK_API_KEY: sk-...`, same as the official LLM providers — one place for all keys). Resolution order: credentials center > settings page > environment variable; the settings-page fields remain for backward compatibility.
-- **Test engine**: Tests the selected engine directly (no fallback chain; paid engines without a key report an explicit error).
-- **Use Bing default**: stage a switch back to the stable free Bing engine; `Discard` only cancels unsaved edits
-- **Platform search**: check platforms (GitHub / V2EX / Bilibili / Reddit / HN / Stack Overflow / Wikipedia / npm) to enable them for the `platform_search` tool (disabled platforms are skipped).
-- **EN / 中文**: toggle the interface language (default Chinese).
+- **Поисковая система**: выпадающий список для смены движка, изменения применяются после сохранения.
+- **API-ключи**: введите ключи для Exa / Tavily / Keenable / Firecrawl / Parallel / Perplexity / DeepSeek (поля-пароли; после сохранения показываются как «настроено»).
+  - **Рекомендация**: платные ключи лучше хранить в центре учётных данных харнесса — `~/.dsh/.credentials.yaml` (например, `DEEPSEEK_API_KEY: sk-...`, так же как официальные LLM-провайдеры — все ключи в одном месте). Приоритет чтения: центр учётных данных → страница настроек → переменная окружения; поля на странице настроек остаются для обратной совместимости.
+- **Проверить движок**: тестирует выбранный движок напрямую (без фоллбэка; платные без ключа явно сообщат об ошибке).
+- **Вернуть Bing по умолчанию**: переключает на стабильный бесплатный Bing; «Отменить» откатывает несохранённые правки.
+- **Поиск по платформам**: отметьте GitHub / V2EX / Bilibili / Reddit / Hacker News / Stack Overflow / Википедия / npm — инструмент `platform_search` будет фильтровать по выбранным.
+- **`ru / 中文 / EN`**: переключатель языка интерфейса (по умолчанию `ru`).
 
 <table align="center" style="border: none; border-collapse: collapse;">
   <tr style="border: none;">
     <td align="center" width="50%" style="border: none; padding: 6px;">
       <a href="https://raw.githubusercontent.com/DDDMUC/dsh-free-search/master/assets/settings-free.png">
-        <img src="https://raw.githubusercontent.com/DDDMUC/dsh-free-search/master/assets/settings-free.png" alt="Free Engine Settings" width="100%" />
+        <img src="https://raw.githubusercontent.com/DDDMUC/dsh-free-search/master/assets/settings-free.png" alt="Настройки бесплатного движка" width="100%" />
       </a>
       <br>
-      <sub>▲ <b>Free Engine</b> (shows green FREE badge and official website link)</sub>
+      <sub>▲ <b>Бесплатный движок</b> (зелёный бейдж FREE и ссылка на сайт)</sub>
     </td>
     <td align="center" width="50%" style="border: none; padding: 6px;">
       <a href="https://raw.githubusercontent.com/DDDMUC/dsh-free-search/master/assets/settings-apikey.png">
-        <img src="https://raw.githubusercontent.com/DDDMUC/dsh-free-search/master/assets/settings-apikey.png" alt="Paid/API Key Engine Settings" width="100%" />
+        <img src="https://raw.githubusercontent.com/DDDMUC/dsh-free-search/master/assets/settings-apikey.png" alt="Настройки платного движка" width="100%" />
       </a>
       <br>
-      <sub>▲ <b>Paid / API Key Engine</b> (shows orange API KEY badge and link to get an API key)</sub>
+      <sub>▲ <b>Платный / API-ключ движок</b> (оранжевый бейдж API KEY и ссылка «Получить ключ»)</sub>
     </td>
   </tr>
 </table>
 
-#### Switching Engines from the Chat (/free-search-engine)
+#### Смена движка из чата (`/free-search-engine`)
 
-You can also switch the engine right from the chat — no need to open the settings page. Type `/free-search-engine`: a **picker opens with all engines** (the same interaction as `/model` for selecting a model). Click one to switch; the current engine is marked. Equivalent to switching and saving in the settings page, and the language follows the settings page (Chinese/English).
+Можно менять движок прямо из чата, без страницы настроек. Введите `/free-search-engine` — откроется **всплывающее окно выбора движка** (тот же UX, что у `/model` для смены модели). Кликните нужный — он подсветится как текущий. Эквивалентно переключению и сохранению на странице настроек; язык подхватывается оттуда же.
 
-The command only changes the preferred engine; search still goes through `web_search` + the unified fallback chain — even if the preferred engine fails, it automatically switches to others, never failing outright. The system prompt refreshes accordingly.
+Команда меняет только предпочтительный движок; сам поиск по-прежнему идёт через `web_search` + единый фоллбэк — даже если предпочтительный движок упадёт, плагин автоматически переключится на другой, поиск никогда не валится напрямую. Системный промпт обновляется синхронно.
 
-#### Configuration File
+#### Конфигурационный файл
 
-Configuration is stored in `~/.dsh/settings.yaml`:
+Конфиг хранится в `~/.dsh/settings.yaml`:
 
 ```yaml
 free-search:
-  provider: bing              # ddg / ddg-lite / bing / searxng / anysearch / exa / tavily / keenable / firecrawl / parallel / perplexity / deepseek-official
-  lang: zh                    # settings UI language (zh / en)
-  bingMarket: zh-CN           # Bing market
-  region: cn-zh               # DuckDuckGo region (optional)
-  searxngInstances:           # Custom SearXNG instances (optional)
+  provider: perplexity         # ddg / ddg-lite / bing / searxng / anysearch / exa / tavily / keenable / firecrawl / parallel / perplexity / deepseek-official
+  lang: ru                     # язык интерфейса карточки настроек (ru / zh / en)
+  keyStorage: credentials      # где хранить ключи: credentials (центр учётных данных) | settings (наследие)
+  bingMarket: ru-RU            # регион Bing (см. карточку настроек)
+  region: ru                   # регион DuckDuckGo (опционально)
+  safeSearch: off              # off | moderate | strict — фильтр Bing/DDG
+  cacheTtl: 5                  # TTL кэша результатов, минут (0–5)
+  searxngInstances:            # кастомные инстансы SearXNG (опционально)
     - https://your-instance.example
-  exaApiKey: ...              # Or configure via the web settings UI
-  tavilyApiKey: ...           # Or configure via the web settings UI
-  keenableApiKey: ...         # Or configure via the web settings UI
-  firecrawlApiKey: ...        # Or configure via the web settings UI
-  parallelApiKey: ...         # Or configure via the web settings UI
-  perplexityApiKey: ...
+  perplexityApiKey: pplx-...   # или настройте через UI (рекомендуется центр учётных данных)
+  exaApiKey: ...
+  tavilyApiKey: ...
+  keenableApiKey: ...
+  firecrawlApiKey: ...
+  parallelApiKey: ...
   deepseekApiKey: ...
+  platforms:                   # платформы для platform_search
+    - github
+    - v2ex
+    - bilibili
+    - reddit
+    - hn
+    - stackoverflow
+    - wikipedia
+    - npm
 ```
 
-#### Asking the Agent to Test All Engines
+Рекомендуемый путь для ключей — центр учётных данных (`~/.dsh/.credentials.yaml` в секции `refs`):
 
-Tell the agent *"Test all search engines"*, and it will call the `free_search_test` tool to check each engine sequentially and report back:
+```yaml
+refs:
+  PERPLEXITY_API_KEY: pplx-...
+  EXA_API_KEY: ...
+  TAVILY_API_KEY: ...
+  KEENABLE_API_KEY: ...
+  FIRECRAWL_API_KEY: ...
+  PARALLEL_API_KEY: ...
+  DEEPSEEK_API_KEY: ...
+```
+
+Приоритет чтения ключей: центр учётных данных → страница настроек → переменная окружения. Хранить в центре учётных данных — единое место для всех ключей, как у официальных LLM-провайдеров.
+
+#### Попросить агента прогнать все движки
+
+Скажите агенту *«проверь все поисковые движки»* — он вызовет инструмент `free_search_test` и пройдёт по всем по очереди:
 
 ```
 Search engine test:
@@ -448,99 +224,157 @@ Search engine test:
 - exa: FAIL - EXA_API_KEY not configured
 ```
 
-#### Time Filtering (`advanced_search`)
+#### Фильтр по времени (`advanced_search`)
 
-Ask the agent for *"news from the last week"*, *"releases this month"*, *"updates from the last 3 days"*, or *"posts since July"*, and it will call the `advanced_search` tool with a `timeRange` parameter. It uses the same unified fallback chain, can force a specific `engine`, and returns the same shape as `web_search`.
+Попросите агента найти «новости за последнюю неделю», «релизы этого месяца», «события за 3 дня», «обновления с июля» — агент вызовет инструмент `advanced_search` с параметром `timeRange`. Тот же единый фоллбэк, можно форсировать конкретный `engine`, формат ответа совпадает с `web_search`.
 
-**The `timeRange` parameter accepts three forms:**
+**`timeRange` принимает три формы:**
 
-| Form | Example | Meaning |
+| Форма | Пример | Значение |
 |---|---|---|
-| Fixed tier | `day` / `week` / `month` / `year` | = 1 / 7 / 30 / 365 days |
-| Custom relative | `12h`, `3d`, `2mo`, `1y` | last 12 hours / 3 days / 2 months / 1 year |
-| Absolute date | `2026-07-01` | results published on or after that date |
+| Фиксированный диапазон | `day` / `week` / `month` / `year` | = 1 / 7 / 30 / 365 дней |
+| Кастомное относительное | `12h`, `3d`, `2mo`, `1y` | последние 12 ч / 3 дня / 2 месяца / 1 год |
+| Абсолютная дата | `2026-07-01` | результаты, опубликованные не раньше этой даты |
 
-**How each engine handles `timeRange`:**
+**Как каждый движок обрабатывает `timeRange`:**
 
-| Engine | Parameter | Precise? | Notes |
+| Движок | Параметр | Точно? | Заметки |
 |---|---|---|---|
-| Exa | `startPublishedDate` | ✅ precise | custom days become an ISO date (N days ago); absolute dates pass through |
-| Keenable | `published_after` | ✅ precise | relative values (`12h/3d/2mo/1y`) and absolute dates pass through |
-| Tavily | `time_range` | ⚠️ approximate | only fixed tiers; custom days map to the nearest tier |
-| Firecrawl | `tbs` | ⚠️ approximate | fixed tiers map to `qdr:d/w/m/y`; absolute dates use `cdr:1,cd_min:M/D/YYYY` (precise) |
-| Parallel | `source_policy.after_date` | ✅ precise | custom days become an ISO date (N days ago); absolute dates pass through |
-| SearXNG | `time_range` | ⚠️ approximate | same as above |
-| DuckDuckGo / Lite | `df` | ⚠️ approximate | same as above |
-| Bing / AnySearch | — | ❌ ignored | no corresponding parameter |
+| Exa | `startPublishedDate` | ✅ точно | кастомные дни → ISO-дата (N дней назад); абсолютные даты пробрасываются |
+| Keenable | `published_after` | ✅ точно | относительные (`12h/3d/2mo/1y`) и абсолютные даты пробрасываются |
+| Tavily | `time_range` | ⚠️ приблизительно | только фиксированные диапазоны; кастомные дни маппятся на ближайший |
+| Firecrawl | `tbs` | ⚠️ приблизительно | фиксированные → `qdr:d/w/m/y`; абсолютные даты → `cdr:1,cd_min:M/D/YYYY` (точно) |
+| Parallel | `source_policy.after_date` | ✅ точно | кастомные дни → ISO-дата; абсолютные пробрасываются |
+| SearXNG | `time_range` | ⚠️ приблизительно | то же, что и Tavily |
+| DuckDuckGo / Lite | `df` | ⚠️ приблизительно | то же, что и Tavily |
+| Bing / AnySearch | — | ❌ игнорируется | параметра нет |
+| Perplexity (форк) | `web_search.filters.search_recency_filter` | ⚠️ приблизительно (hour/day/week/month/year) | + `last_updated_after_filter` (абсолютная дата, точно) |
 
-**Nearest-tier mapping rule**: `≤2 days → day`, `≤14 days → week`, `≤90 days → month`, otherwise `year`. For example, `3d` becomes `day` on Tavily, and `2mo` becomes `month`.
+**Правило ближайшего диапазона**: `≤2 дней → day`, `≤14 → week`, `≤90 → month`, иначе `year`. Например, `3d` для Tavily станет `day`, `2mo` — `month`.
 
-**Engine-chain priority**: when a `timeRange` is present, engines that support time filtering (tavily / exa / keenable / firecrawl / parallel / searxng / ddg / ddg-lite) are moved to the front of the fallback chain, so the filter actually takes effect — even if the preferred engine is bing (which does not support filtering), a filtering-capable engine is tried first.
+**Приоритет в цепочке движков**: когда передан `timeRange`, движки с поддержкой фильтра по времени (tavily / exa / keenable / firecrawl / parallel / searxng / ddg / ddg-lite / perplexity) поднимаются в начало цепочки фоллбэка, чтобы фильтр реально сработал — даже если выбран, скажем, Bing (без фильтра), сначала попробуется движок с фильтром.
 
-Example: *"Find DSH news from the last 3 days"* → agent calls `advanced_search` with `timeRange: "3d"`.
+Пример: *«найди новости о DSH за последние 3 дня»* → агент вызывает `advanced_search` с `timeRange: "3d"`.
 
-#### Fetch Webpage Content (`web_fetch`)
+#### Чтение страниц (`web_fetch`)
 
-After searching, the agent can **read full webpage content** (e.g., *"Open the first link and summarize it"*). The `web_fetch` tool is enabled by default (official `dsh-web-fetch-http` provider):
+После поиска агент может прочитать полный текст страницы («открой первую ссылку и расскажи, что там»). Инструмент `web_fetch` включён по умолчанию (официальный провайдер `dsh-web-fetch-http`):
 
-- Automatically follows redirects and decodes HTML to plain text.
-- Supports timeout and response size limits.
-- ⚠️ Note: `web_fetch` does not have SSRF protection; the agent could theoretically access internal network addresses. Use as needed.
+- автоматически следует редиректам и декодирует HTML в текст;
+- поддерживает таймаут и ограничение размера ответа;
+- ⚠️ У `web_fetch` нет защиты от SSRF — агент теоретически может обращаться к внутренним адресам. Используйте осознанно.
 
-#### Platform Search (`platform_search`)
+#### Поиск по платформам (`platform_search`)
 
-Ask the agent to search specific platforms (e.g., *"Search GitHub for deepseek harness"*, *"Find related videos on Bilibili"*, or *"Discussions about dsh on V2EX"*). The `platform_search` tool supports:
+Попросите агента искать в конкретных платформах: «поищи на GitHub про deepseek harness», «что есть на Bilibili по теме», «дискуссии про dsh на V2EX». Инструмент `platform_search` поддерживает:
 
-| Platform | Purpose |
+| Платформа | Назначение |
 |---|---|
-| `github` | GitHub repository search (public API, free, no key required) |
-| `v2ex` | V2EX hot / relevant topics |
-| `bilibili` | Bilibili video / content search (public API) |
-| `reddit` | Reddit posts / discussions (public JSON API; may be blocked by Reddit anti-bot in some network environments) |
-| `hn` | Hacker News tech community discussions (official Algolia API) |
-| `stackoverflow` | Stack Overflow Q&A (official public Stack Exchange API) |
-| `wikipedia` | Wikipedia articles (zh.wikipedia.org for Chinese; switches to en.wikipedia.org when `lang: en`) |
-| `npm` | npm package search (registry official API) |
+| `github` | Поиск репозиториев GitHub (публичный API, бесплатно, без ключа) |
+| `v2ex` | Горячее / релевантное на V2EX |
+| `bilibili` | Поиск видео / контента на Bilibili (публичный API) |
+| `reddit` | Посты / обсуждения Reddit (публичный JSON API; в некоторых сетях Reddit блокирует по антиботу) |
+| `hn` | Hacker News — технические обсуждения (официальный API Algolia) |
+| `stackoverflow` | Stack Overflow Q&A (официальный публичный API Stack Exchange) |
+| `wikipedia` | Статьи Википедии (ru.wikipedia.org в русской локали, en.wikipedia.org при `lang: en`) |
+| `npm` | Поиск пакетов в npm (официальный API registry) |
 
-All platform searches rely on public endpoints with zero external dependencies and no API keys — they work out of the box.
+Все используют публичные эндпоинты, без внешних зависимостей и API-ключей — работают сразу.
 
-### Local Engine Switcher (`tools/`)
+### Локальный переключатель движков (`tools/`)
 
-The `tools/` directory includes a lightweight, zero-dependency switcher:
+В каталоге `tools/` лежит легковесная утилита без зависимостей:
 
-- **`启动搜索引擎切换器.cmd`** (Windows) — Double-click to launch a local Node server (`http://127.0.0.1:4789`) and automatically open the engine selector page in your browser.
-- **`switch-engine.html`** — The selector UI: displays current engine status and allows one-click switching.
-- **`server.mjs`** — The local backend service responsible for reading/writing `~/.dsh/profiles/web/cordis.patch.yml`.
-- **`switch-engine.ps1`** — Headless PowerShell script: `powershell -File tools/switch-engine.ps1 -Engine bing`.
+- **`启动搜索引擎切换器.cmd`** (Windows) — двойной клик запускает локальный Node-сервер (`http://127.0.0.1:4789`) и автоматически открывает страницу выбора в браузере.
+- **`switch-engine.html`** — UI выбора: показывает текущий движок и позволяет сменить его одним кликом.
+- **`server.mjs`** — локальный бэкенд, читает/пишет `~/.dsh/profiles/web/cordis.patch.yml`.
+- **`switch-engine.ps1`** — безголовый PowerShell-вариант: `powershell -File tools/switch-engine.ps1 -Engine bing`.
 
-Restart `dsh web` after switching to apply changes.
+После переключения перезапустите `dsh web`, чтобы изменения вступили в силу.
 
-> The settings card mounts into the official `settings.plugin.item` slot (built into DSH), and configuration reads/writes go through the plugin's own bridge. **No `dsh-web-ui` dependency — the plugin can be used standalone.**
+> Карточка настроек цепляется в официальный слот `settings.plugin.item` (он встроен в dsh); чтение/запись конфигурации идут через собственный мост плагина. **Зависимости от `dsh-web-ui` нет** — плагин работает автономно.
 
-### Proxy Note (for Users in Mainland China)
+### Прокси (для пользователей в Китае)
 
-Engines like DuckDuckGo may require a proxy. Since Node.js `fetch` does not use the system proxy by default, set the following environment variables for the dsh process (Node 24+):
+Некоторые движки (например, DuckDuckGo) могут требовать прокси. По умолчанию `fetch` в Node.js не ходит через системный прокси, поэтому для процесса dsh нужно выставить (Node 24+):
 
 ```sh
 export NODE_USE_ENV_PROXY=1
-export HTTPS_PROXY=http://127.0.0.1:7897   # Your proxy address
+export HTTPS_PROXY=http://127.0.0.1:7897   # ваш прокси
 export HTTP_PROXY=http://127.0.0.1:7897
 ```
 
-Windows users: The desktop shortcut already includes this configuration (`set NODE_USE_ENV_PROXY=1&& set HTTPS_PROXY=...`).
+Пользователям Windows: ярлык уже включает эту конфигурацию (`set NODE_USE_ENV_PROXY=1&& set HTTPS_PROXY=...`).
 
-### How It Works
+### Как это работает
 
-- `lib/index.js`: Host side. Implements `WebSearchProvider` (`id` / `available()` / `search()`), unified engine routing + auto-fallback (paid engines first, free as fallback); parses `timeRange` (fixed tiers / relative values / absolute dates) and forwards it to each engine; registers the `free-search` settings namespace; provides the `/api/dsh-free-search-settings` read/write bridge + `raw-search` debug endpoint; registers the `free_search_test`, `platform_search`, and `advanced_search` tools; dynamically injects the engine list into system prompts (auto-refreshes on settings change).
-- `lib/client.js`: Browser side. React configuration card (engine select, key inputs, connectivity test, and Chinese/English toggle), mounted into the official `settings.plugin.item` slot; registers the `/free-search-engine` popup switch command (`commandUi` popupSelect, the same mechanism as `/model`).
-- `cordis.patch.yml`: Plugin loader configuration.
+- `lib/index.js` — хостовая часть. Реализует `WebSearchProvider` (`id` / `available()` / `search()`), единую маршрутизацию движков + автофоллбэк (платные первыми, бесплатные как fallback); парсит `timeRange` (фиксированные диапазоны / относительные значения / абсолютные даты) и пробрасывает в каждый движок; регистрирует namespace настроек `free-search`; предоставляет мост чтения/записи `/api/dsh-free-search-settings` + отладочный эндпоинт `raw-search`; регистрирует инструменты `free_search_test`, `platform_search` и `advanced_search`; динамически инжектит список движков в системный промпт (обновляется при смене настроек).
+- `lib/client.js` — браузерная часть. React-карточка настроек (выбор движка, поля ключей, тест связности, переключатель языка), монтируется в официальный слот `settings.plugin.item`; регистрирует всплывающую команду `/free-search-engine` (popupSelect через `commandUi`, тот же механизм, что у `/model`).
+- `cordis.patch.yml` — конфигурация загрузчика плагина.
+
+### Что нового в этом форке (vs апстрим)
+
+| Версия форка | Изменение |
+|---|---|
+| 0.4.29 | Русский UI карточки настроек (по умолчанию `ru`); Perplexity переведён на новый Agent API `/v1/agent` с моделью `perplexity/sonar` и явным `web_search` tool; добавлена поддержка `timeRange` для Perplexity через `search_recency_filter`; README и комментарии в коде переведены на русский |
+
+### Лицензия
+
+MIT
+
+---
+
+## English
+
+This section mirrors the upstream documentation. Most descriptions of engines and behavior are identical; the only differences live in this fork's code (Russian UI, Perplexity on Agent API). For the upstream's English docs see [DDDMUC/dsh-free-search](https://github.com/DDDMUC/dsh-free-search).
+
+### Why You Need It
+
+dsh's default search provider depends on the official DeepSeek API key (`DEEPSEEK_API_KEY`). If you:
+
+- do not have (or do not want to use) the official DeepSeek key,
+- use a gateway like opencode-go whose OpenAI-compatible endpoint does not support the `web_search` tool,
+
+…then the built-in search inevitably fails, and the agent reports that it cannot reach the internet.
+
+This plugin provides several free engines and automatic fallback between them, removing the dependency on the DeepSeek key.
+
+### Features
+
+- **Zero cost** — multiple free engines with no key or registration.
+- **12 engines**: DuckDuckGo (HTML / Lite), Bing, SearXNG (meta-search with custom instances), AnySearch, Exa, Tavily, Keenable, Firecrawl, Parallel, Perplexity, official DeepSeek.
+- **Web settings UI** — engine switching + API keys (keys masked as "configured") + `ru / 中文 / EN` language toggle.
+- **Popup switch command** — type `/free-search-engine` in chat; a picker opens with all engines (same interaction as `/model`).
+- **Engine testing** — `free_search_test` tool; the settings card also has a "Test engine" button (no fallback chain; paid engines without a key report an explicit error).
+- **Unified engine fallback** — any engine failure (paid or free; missing key / 401 / rate limit / network) tries the next engine in chain: configured engine first → other engines (exa / tavily / keenable / firecrawl even without a key thanks to their keyless quota) → remaining free engines. Search never fails outright; the results include a note naming the engine that actually served the request (e.g. `Note: perplexity unavailable or failed, using exa.`).
+- **Time filtering** — `advanced_search` supports `timeRange` (fixed tiers, custom relative, absolute date).
+- **System prompt injection** — the agent knows the active engine and which ones require keys.
+- **Version + update check** — the card shows the current version and offers a "Check update" button that compares against the npm registry.
+- **Result caching** — identical queries (same engine + time-filter args) hit an LRU cache (50 entries) for up to 5 minutes; TTL configurable 0–5 minutes (0 disables caching).
+- **Badges** — free engines show a green `FREE` badge; paid engines show an orange `API KEY` badge.
+- **`web_fetch`** — the agent can read full webpage contents (official `dsh-web-fetch-http` provider, pure JS, no dependencies).
+- **`platform_search`** — search GitHub / V2EX / Bilibili / Reddit / Hacker News / Stack Overflow / Wikipedia / npm via public APIs (no keys, no dependencies).
+- **Clean integration** — implements the official `WebSearchProvider` seam, coexists with official plugins.
+
+### Supported Engines
+
+| id | Engine | Cost | Description |
+|---|---|---|---|
+| `ddg` | DuckDuckGo HTML | Free | Occasional rate limits (anti-bot); recovers automatically |
+| `ddg-lite` | DuckDuckGo Lite | Free | Lighter version, same rate-limit behavior |
+| `bing` | Bing | Free | **Default engine**, most stable, optimized for Chinese (`zh-CN`) |
+| `anysearch` | AnySearch AI | Free | AI search, no key (anonymous quota) |
+| `searxng` | SearXNG meta-search | Free | Multi-instance failover; supports custom instances |
+| `exa` | Exa | Free | **Usable without a key** (anonymous MCP); key raises quota |
+| `tavily` | Tavily | Free | **Usable without a key** (keyless anonymous); key raises quota |
+| `keenable` | Keenable | Free | **Usable without a key** (anonymous MCP); key unlocks REST with org-scoped limits |
+| `firecrawl` | Firecrawl | Free | **Usable without a key** (official keyless quota); key raises limits |
+| `parallel` | Parallel | Paid | Requires `PARALLEL_API_KEY` (free tier available) |
+| `perplexity` | Perplexity | Paid | Requires `PERPLEXITY_API_KEY`. In this fork — on the new Agent API `/v1/agent` |
+| `deepseek-official` | DeepSeek Official | Paid | Requires `DEEPSEEK_API_KEY` |
+
+The rest of the configuration, installation, time filtering, and platform search sections are identical to the upstream — see the Russian section above for the full details.
 
 ### License
 
 MIT
-
-## safeSearch 安全搜索过滤
-
-- 全新配置项 `safeSearch`：`off`（引擎默认，不加参数）/ `moderate` / `strict`
-- 作用于 Bing（adlt）、DuckDuckGo HTML（adlt）、DuckDuckGo Lite（adlt）
-- 默认 `off`：不额外过滤，保持引擎自身默认行为；需要时在「设置 > 插件 > Free Search」切换
