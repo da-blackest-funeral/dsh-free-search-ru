@@ -1,4 +1,13 @@
-# dsh-free-search
+# dsh-free-search-ru
+
+> **Форк [DDDMUC/dsh-free-search](https://github.com/DDDMUC/dsh-free-search).** Главные отличия от апстрима:
+>
+> - **Русский интерфейс** в карточке настроек (по умолчанию `ru`; переключатель `ru → 中文 → EN → ru`).
+> - **Perplexity на новом Agent API** (`POST /v1/agent`, модель `perplexity/sonar` + `web_search` tool). Старый `/v1/chat/completions` отключится 27 сентября 2026, так что без этого апстрим скоро сломается.
+> - **Time-filter для Perplexity** — теперь работает через `web_search.filters.search_recency_filter` (hour/day/week/month/year).
+> - **Корректный парсинг новых источников** — `output[].search_results` с полями `title`, `snippet`, `url`, `date`, `last_updated` (а не старый плоский `citations[]`).
+>
+> Форк поддерживается в актуальном состоянии с апстримом через git remote `upstream`.
 
 **DeepSeek Harness 免费搜索插件 —— 无需 API key，零成本，多引擎可切换。** 一个给 DeepSeek Harness (dsh) 添加多引擎搜索 provider 的插件，注册进 `ctx.web` seam。内置 `web_search` 工具自动选用，支持网页设置页切换引擎、配置 API key、一键测试所有引擎、弹出式命令切换引擎。
 

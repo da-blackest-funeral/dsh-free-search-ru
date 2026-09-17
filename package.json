@@ -1,7 +1,7 @@
 {
-  "name": "dsh-free-search",
-  "version": "0.4.28",
-  "description": "Free web search for DeepSeek Harness: 12 engines (Bing/DuckDuckGo/AnySearch/SearXNG/Exa/Tavily/Keenable/Firecrawl keyless; Parallel/Perplexity/DeepSeek with key) + time filtering + platform search + web_fetch, with web settings UI.",
+  "name": "dsh-free-search-ru",
+  "version": "0.4.29",
+  "description": "Форк dsh-free-search с русским интерфейсом и обновлённой интеграцией Perplexity (Agent API /v1/agent). 12 движков, time filtering, platform_search, web_fetch.",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -36,7 +36,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/DDDMUC/dsh-free-search.git"
+    "url": "https://github.com/da-blackest-funeral/dsh-free-search-ru.git"
   },
   "engines": {
     "node": ">=20"
